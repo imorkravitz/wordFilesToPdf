@@ -2,6 +2,9 @@ import os
 import io
 import logging
 import subprocess
+import time
+
+from datetime import datetime
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -14,6 +17,29 @@ logging.basicConfig(filename='/Users/orkravitz/logs/word_to_pdf_conversion.log',
 # Define the path to the credentials and token files
 credentials_path = '/Users/orkravitz/Downloads/wordFilesToPdfCredentials/Credentials.json'
 token_path = '/Users/orkravitz/Downloads/wordFilesToPdfCredentials/token.json'
+
+
+# Function to create a folder on Google Drive
+# Function to create or find a folder with today's date
+def create_date_folder(service, parent_id):
+    date_folder_name = datetime.today().strftime('%Y-%m-%d')
+    # Check if folder already exists
+    query = f"name='{date_folder_name}' and mimeType='application/vnd.google-apps.folder' and '{parent_id}' in parents and trashed=false"
+    results = service.files().list(q=query).execute()
+    folders = results.get('files', [])
+
+    if folders:
+        return folders[0]['id']  # Use the existing folder
+    else:
+        # Create a new folder
+        file_metadata = {'name': date_folder_name, 'mimeType': 'application/vnd.google-apps.folder',
+                         'parents': [parent_id]}
+        try:
+            folder = service.files().create(body=file_metadata, fields='id').execute()
+            return folder['id']
+        except Exception as e:
+            logging.error(f"Failed to create folder {date_folder_name}: {str(e)}")
+            return None
 
 
 def convert_docx_to_pdf(docx_path, pdf_path):
@@ -32,11 +58,14 @@ def convert_docx_to_pdf(docx_path, pdf_path):
 
 
 def upload_file_to_drive(service, filename, filepath, folder_id):
+    if filename.startswith('.') or filename == '.DS_Store':  # Ignore system files
+        return False
     file_metadata = {'name': filename, 'parents': [folder_id]}
     media = MediaFileUpload(filepath, mimetype='application/pdf')
     try:
         file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        logging.info(f"Uploaded {filename} to Google Drive with ID {file['id']}")
+        os.remove(filepath)
+        logging.info(f"Uploaded {filename} to Google Drive and removed from local storage with ID {file['id']}")
         return True
     except Exception as e:
         logging.error(f"Failed to upload {filename} to Google Drive: {str(e)}")
@@ -70,10 +99,15 @@ if not creds or not creds.valid:
         token_file.write(creds.to_json())
         logging.info("Saved new token.")
 
-service = build('drive', 'v3', credentials=creds)
+
 source_folder_id = '18mPs5azAs4pSf-iE0IpR1sWFJb--fIs3'
 destination_folder_id = '1CSAKqgTKfIrCOCZwiem8CQH-DRA6bqv1'
 
+service = build('drive', 'v3', credentials=creds)
+today_folder_id = create_date_folder(service, destination_folder_id)  # Create or find today's folder
+
+
+# Process files from source Google Drive folder
 if check_folder_empty(service, source_folder_id):
     logging.info("No files to process in the Google Drive folder.")
 else:
@@ -102,14 +136,17 @@ else:
         output_file = os.path.join(dest_path, file_name.replace('.docx', '.pdf'))
         if convert_docx_to_pdf(file_path, output_file):
             os.remove(file_path)
-            logging.info(f'Removed {file_name} from local storage.')
-            service.files().delete(fileId=file_id).execute()  # Delete the file from Google Drive after conversion
-            logging.info(f"Deleted {file_name} from Google Drive.")
+            service.files().delete(fileId=file_id).execute()
+            logging.info(f"Deleted {file_name} from Google Drive after conversion")
 
-    # Upload all PDFs from the protected path
+    # Wait 1 minute to ensure all background processes complete
+    logging.info("Waiting for 1 minute before uploading PDF files.")
+    time.sleep(60)
+
+    # Upload all eligible PDFs from the protected path to today's folder in one bulk
     for pdf_file in os.listdir(protected_pdf_to_upload_path):
         pdf_file_path = os.path.join(protected_pdf_to_upload_path, pdf_file)
-        if os.path.isfile(pdf_file_path):
-            upload_file_to_drive(service, pdf_file, pdf_file_path, destination_folder_id)
+        if os.path.isfile(pdf_file_path) and not pdf_file.startswith('.'):
+            upload_file_to_drive(service, pdf_file, pdf_file_path, today_folder_id if today_folder_id else destination_folder_id)
 
 logging.info("Script completed.")
