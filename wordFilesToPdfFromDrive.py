@@ -3,7 +3,6 @@ import io
 import logging
 import subprocess
 import time
-import warnings
 
 from datetime import datetime
 from google.oauth2.credentials import Credentials
@@ -12,13 +11,19 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from google.auth.transport.requests import Request
 
-warnings.filterwarnings('ignore', 'file_cache is only supported with oauth2client<4.0.0')
+from googleapiclient.discovery_cache.base import Cache
+
+Cache.DISCOVERY_DOC_MAX_AGE = 0
+
 # Setup logging
 logging.basicConfig(
     filename='/Users/orkravitz/logs/word_to_pdf_conversion.log',
     level=logging.INFO,
     format='%(asctime)s:%(levelname)s:%(message)s'
 )
+
+logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
+
 # Define the path to the credentials and token files
 credentials_path = '/Users/orkravitz/Downloads/wordFilesToPdfCredentials/Credentials.json'
 token_path = '/Users/orkravitz/Downloads/wordFilesToPdfCredentials/token.json'
