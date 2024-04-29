@@ -8,7 +8,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
-from google.oauth2 import service_account
+from google.auth.transport.requests import Request
 
 
 def setup_logging():
@@ -18,6 +18,30 @@ def setup_logging():
         format='%(asctime)s:%(levelname)s:%(message)s'
     )
     logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
+
+
+def get_credentials(credentials_path, token_path, scopes):
+    creds = None
+
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, scopes)
+        logging.info("Loaded existing token.")
+    else:
+        logging.info("No existing token found, need to authenticate.")
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            logging.info("Refreshed the existing token.")
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, scopes)
+            creds = flow.run_local_server(port=0)
+            logging.info("Generated new token.")
+        with open(token_path, 'w') as token_file:
+            token_file.write(creds.to_json())
+            logging.info("Saved new token.")
+
+    return creds
 
 
 def authenticate_google_drive(credentials_path, token_path, scopes):
@@ -120,13 +144,14 @@ SOURCE_UPLOAD_TO_GOOGLE_DRIVE = '/Users/orkravitz/Downloads/ProtectMyPDF/protect
 credentials_path = '/Users/orkravitz/Downloads/wordFilesToPdfCredentials/Credentials.json'
 token_path = '/Users/orkravitz/Downloads/wordFilesToPdfCredentials/token.json'
 
-SERVICE_ACCOUNT_FILE = '/Users/orkravitz/Downloads/wordFilesToPdfCredentials/service_account.json'
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
 
 def main():
     setup_logging()
-    creds = authenticate_google_drive(credentials_path, token_path, ['https://www.googleapis.com/auth/drive'])
+
+    creds = get_credentials(credentials_path, token_path, SCOPES)
+
     service = build('drive', 'v3', credentials=creds)
 
     today_folder_id = create_date_folder(service, DESTINATION_ID)
