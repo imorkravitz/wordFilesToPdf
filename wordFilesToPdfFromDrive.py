@@ -119,13 +119,18 @@ def download_and_convert_files(service, source_folder_id, download_path, destina
 
 def upload_files(service, upload_path, folder_id):
     files_to_upload = [f for f in os.listdir(upload_path) if os.path.isfile(os.path.join(upload_path, f)) and not f.startswith('.') and f.lower().endswith('.pdf') and '.DS_Store' not in f and "subset" not in f]
-    for pdf_file in files_to_upload:
-        pdf_file_path = os.path.join(upload_path, pdf_file)
-        file_metadata = {'name': pdf_file, 'parents': [folder_id]}
-        media = MediaFileUpload(pdf_file_path, mimetype='application/pdf')
-        file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        os.remove(pdf_file_path)
-        logging.info(f"Uploaded {pdf_file} to Google Drive and removed from local storage")
+    # Wait 30 seconds to ensure all background processes complete
+    if len(files_to_upload) > 0:
+        logging.info("Waiting for 30 seconds before uploading PDF files.")
+        time.sleep(30)
+
+        for pdf_file in files_to_upload:
+            pdf_file_path = os.path.join(upload_path, pdf_file)
+            file_metadata = {'name': pdf_file, 'parents': [folder_id]}
+            media = MediaFileUpload(pdf_file_path, mimetype='application/pdf')
+            file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            os.remove(pdf_file_path)
+            logging.info(f"Uploaded {pdf_file} to Google Drive and removed from local storage")
 
 
 def check_folder_empty(serv, folder_id):
@@ -164,9 +169,6 @@ def main():
             logging.info(f"Files uploaded by {owner}: {count}")
             download_and_convert_files(service, SOURCE_ID, SOURCE_WORD_FILES, DESTINATION_PDF_FILES)
 
-    # Wait 30 seconds to ensure all background processes complete
-    logging.info("Waiting for 30 seconds before uploading PDF files.")
-    time.sleep(30)
     upload_files(service, SOURCE_UPLOAD_TO_GOOGLE_DRIVE, today_folder_id)
 
 
