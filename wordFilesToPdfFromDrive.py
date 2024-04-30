@@ -3,7 +3,7 @@ import io
 import logging
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -117,6 +117,40 @@ def download_and_convert_files(service, source_folder_id, download_path, destina
                 logging.error(f"Failed to delete {file_name}: {e}")
 
 
+def copy_files(service, source_folder_id, destination_folder_id):
+    results = service.files().list(q=f"'{source_folder_id}' in parents and trashed=false").execute()
+    items = results.get('files', [])
+
+    if not items:
+        logging.info("No files found to copy. Exiting script.")
+        return
+
+    current_time = datetime.utcnow()
+
+    for item in items:
+        file_id = item['id']
+        file_name = item['name']
+
+        # Retrieve creation time of the file
+        creation_time = service.files().get(fileId=file_id, fields="createdTime").execute()['createdTime']
+        creation_time = datetime.fromisoformat(creation_time[:-1])  # Remove Z from ISO format
+
+        # Calculate time difference
+        time_diff = current_time - creation_time
+
+        if time_diff > timedelta(minutes=1):
+            logging.info(f"Skipping file {file_name}. Uploaded more than 1 minute ago.")
+            continue
+
+        file_metadata = {'name': file_name, 'parents': [destination_folder_id]}
+
+        try:
+            service.files().copy(fileId=file_id, body=file_metadata).execute()
+            logging.info(f"Copied file {file_name} to destination folder.")
+        except Exception as e:
+            logging.error(f"Failed to copy file {file_name}: {e}")
+
+
 def upload_files(service, upload_path, folder_id):
     files_to_upload = [f for f in os.listdir(upload_path) if os.path.isfile(os.path.join(upload_path, f)) and not f.startswith('.') and f.lower().endswith('.pdf') and '.DS_Store' not in f and "subset" not in f]
     # Wait 30 seconds to ensure all background processes complete
@@ -142,6 +176,7 @@ def check_folder_empty(serv, folder_id):
 # Paths
 SOURCE_ID = '18mPs5azAs4pSf-iE0IpR1sWFJb--fIs3'
 DESTINATION_ID = '1CSAKqgTKfIrCOCZwiem8CQH-DRA6bqv1'
+MAIN_SERVICE_ID = '12lwiL7IGBp0aRZy1E88oErpC7cmJK1X9'
 SOURCE_WORD_FILES = '/Users/orkravitz/Downloads/ProtectMyPDF/wordFilesToPdf'
 DESTINATION_PDF_FILES = '/Users/orkravitz/Downloads/ProtectMyPDF/pdf_toSplit_toEncrypt'
 SOURCE_UPLOAD_TO_GOOGLE_DRIVE = '/Users/orkravitz/Downloads/ProtectMyPDF/protected'
@@ -161,13 +196,15 @@ def main():
 
     today_folder_id = create_date_folder(service, DESTINATION_ID)
 
+    copy_files(service, SOURCE_ID, MAIN_SERVICE_ID)
+
     if check_folder_empty(service, SOURCE_ID):
         logging.info("No files to process in the Google Drive folder.")
     else:
         file_owners = get_file_owners(service, SOURCE_ID)
         for owner, count in file_owners.items():
             logging.info(f"Files uploaded by {owner}: {count}")
-            download_and_convert_files(service, SOURCE_ID, SOURCE_WORD_FILES, DESTINATION_PDF_FILES)
+            download_and_convert_files(service, MAIN_SERVICE_ID, SOURCE_WORD_FILES, DESTINATION_PDF_FILES)
 
     upload_files(service, SOURCE_UPLOAD_TO_GOOGLE_DRIVE, today_folder_id)
 
