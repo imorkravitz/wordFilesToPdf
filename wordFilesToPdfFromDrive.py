@@ -118,28 +118,25 @@ def download_and_convert_files(service, source_folder_id, download_path, destina
 
 
 def copy_files(service, source_folder_id, destination_folder_id):
+    current_time = datetime.utcnow()
+
+    # Load existing copied file names from the log file
+    copied_files = set()
+    if os.path.exists(LOG_FILE_PATH):
+        with open(LOG_FILE_PATH, 'r') as log_file:
+            for line in log_file:
+                copied_files.add(line.strip())
+
     results = service.files().list(q=f"'{source_folder_id}' in parents and trashed=false").execute()
     items = results.get('files', [])
-
-    if not items:
-        logging.info("No files found to copy. Exiting script.")
-        return
-
-    current_time = datetime.utcnow()
 
     for item in items:
         file_id = item['id']
         file_name = item['name']
 
-        # Retrieve creation time of the file
-        creation_time = service.files().get(fileId=file_id, fields="createdTime").execute()['createdTime']
-        creation_time = datetime.fromisoformat(creation_time[:-1])  # Remove Z from ISO format
-
-        # Calculate time difference
-        time_diff = current_time - creation_time
-
-        if time_diff > timedelta(minutes=1):
-            logging.info(f"Skipping file {file_name}. Uploaded more than 1 minute ago.")
+        # Check if the file has already been copied
+        if file_name in copied_files:
+            logging.info(f"Skipping file {file_name}. Already copied.")
             continue
 
         file_metadata = {'name': file_name, 'parents': [destination_folder_id]}
@@ -147,6 +144,10 @@ def copy_files(service, source_folder_id, destination_folder_id):
         try:
             service.files().copy(fileId=file_id, body=file_metadata).execute()
             logging.info(f"Copied file {file_name} to destination folder.")
+
+            # Update the log file with the copied file name
+            with open(LOG_FILE_PATH, 'a') as log_file:
+                log_file.write(file_name + '\n')
         except Exception as e:
             logging.error(f"Failed to copy file {file_name}: {e}")
 
@@ -155,8 +156,8 @@ def upload_files(service, upload_path, folder_id):
     files_to_upload = [f for f in os.listdir(upload_path) if os.path.isfile(os.path.join(upload_path, f)) and not f.startswith('.') and f.lower().endswith('.pdf') and '.DS_Store' not in f and "subset" not in f]
     # Wait 30 seconds to ensure all background processes complete
     if len(files_to_upload) > 0:
-        logging.info("Waiting for 30 seconds before uploading PDF files.")
-        time.sleep(30)
+        # logging.info("Waiting for 30 seconds before uploading PDF files.")
+        # time.sleep(30)
 
         for pdf_file in files_to_upload:
             pdf_file_path = os.path.join(upload_path, pdf_file)
@@ -180,6 +181,8 @@ MAIN_SERVICE_ID = '12lwiL7IGBp0aRZy1E88oErpC7cmJK1X9'
 SOURCE_WORD_FILES = '/Users/orkravitz/Downloads/ProtectMyPDF/wordFilesToPdf'
 DESTINATION_PDF_FILES = '/Users/orkravitz/Downloads/ProtectMyPDF/pdf_toSplit_toEncrypt'
 SOURCE_UPLOAD_TO_GOOGLE_DRIVE = '/Users/orkravitz/Downloads/ProtectMyPDF/protected'
+# Define the path to the temporary log file
+LOG_FILE_PATH = '/Users/orkravitz/logs/copiedFileLog.txt'
 
 credentials_path = '/Users/orkravitz/Downloads/wordFilesToPdfCredentials/Credentials.json'
 token_path = '/Users/orkravitz/Downloads/wordFilesToPdfCredentials/token.json'
@@ -211,3 +214,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    logging.info("process end.")
