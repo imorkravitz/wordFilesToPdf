@@ -2,13 +2,15 @@ import os
 import io
 import logging
 import subprocess
-import time
 from datetime import datetime, timedelta
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from google.auth.transport.requests import Request
+
+
+TOKEN_EXPIRY_DAYS = 5
 
 
 def setup_logging():
@@ -20,26 +22,39 @@ def setup_logging():
     logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 
 
+def is_token_expired(token_path, expiry_days):
+    """Check if the token file has expired based on modification time."""
+    if os.path.exists(token_path):
+        modification_time = os.path.getmtime(token_path)
+        expiration_time = datetime.fromtimestamp(modification_time) + timedelta(days=expiry_days)
+        return datetime.now() > expiration_time
+    return True  # Treat missing token file as expired
+
+
 def get_credentials(credentials_path, token_path, scopes):
     creds = None
 
-    if os.path.exists(token_path):
+    if os.path.exists(token_path) and not is_token_expired(token_path, TOKEN_EXPIRY_DAYS):
         creds = Credentials.from_authorized_user_file(token_path, scopes)
         logging.info("Loaded existing token.")
     else:
-        logging.info("No existing token found, need to authenticate.")
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            logging.info("Refreshed the existing token.")
+        if os.path.exists(token_path):
+            logging.info("Token expired or missing. Need to authenticate.")
+            os.remove(token_path)
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, scopes)
-            creds = flow.run_local_server(port=0)
-            logging.info("Generated new token.")
+            logging.info("No existing token found. Need to authenticate.")
+
+        flow = InstalledAppFlow.from_client_secrets_file(credentials_path, scopes)
+        creds = flow.run_local_server(port=0)
+        logging.info("Generated new token.")
+
         with open(token_path, 'w') as token_file:
             token_file.write(creds.to_json())
             logging.info("Saved new token.")
+
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        logging.info("Refreshed the existing token.")
 
     return creds
 
